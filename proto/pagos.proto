@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+// PagosService owns the payment ledger. Every charge goes through the external
+// gateway (pasarela) behind a Circuit Breaker and a Bulkhead.
+package pagos;
+
+service PagosService {
+  rpc ListarMetodosPago(ListarMetodosPagoRequest) returns (ListarMetodosPagoResponse);
+  rpc Cobrar(CobrarRequest) returns (PagoResponse);
+  rpc Reembolsar(ReembolsarRequest) returns (PagoResponse);
+  rpc ConsultarPago(ConsultarPagoRequest) returns (PagoResponse);
+  rpc EstadoCircuito(EstadoCircuitoRequest) returns (EstadoCircuitoResponse);
+}
+
+message ListarMetodosPagoRequest {}
+
+message MetodoPago {
+  string metodo = 1;
+  string descripcion = 2;
+}
+
+message ListarMetodosPagoResponse {
+  repeated MetodoPago metodos = 1;
+}
+
+message CobrarRequest {
+  string saga_id = 1;
+  int64 monto_centavos = 2;
+  string moneda = 3;
+  string idempotency_key = 4;
+}
+
+message ReembolsarRequest {
+  string saga_id = 1;
+  string idempotency_key = 2;
+}
+
+message ConsultarPagoRequest {
+  string saga_id = 1;
+}
+
+message Pago {
+  string pago_id = 1;
+  string saga_id = 2;
+  int64 monto_centavos = 3;
+  string moneda = 4;
+  string estado = 5; // CONFIRMADO | REEMBOLSADO | FALLIDO
+  string pasarela_ref = 6;
+  string actualizado_en = 7;
+}
+
+message PagoResponse {
+  Pago pago = 1;
+  string estado = 2;   // CONFIRMADO | REEMBOLSADO | FALLIDO
+  bool idempotente = 3; // true when the answer came from the idempotency store
+}
+
+message EstadoCircuitoRequest {}
+
+// Observability of the fragile dependency, exposed so the BFF and the demo
+// scripts can show the circuit and the bulkhead state live.
+message EstadoCircuitoResponse {
+  string estado = 1;              // CLOSED | OPEN | HALF_OPEN
+  int32 fallos_consecutivos = 2;
+  int64 llamadas_rechazadas = 3;  // fail-fast calls rejected by an open circuit
+  int32 llamadas_en_curso = 4;    // bulkhead in use
+  int64 rechazos_bulkhead = 5;
+  string fallback = 6;            // degradation mode currently applied
+}

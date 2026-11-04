@@ -1,0 +1,290 @@
+# Sistema de ticketera — Unidad 3, Forma I.
+#
+# Levanta el sistema completo con un único `docker compose up --build`.
+# Solo el gateway (8080) y el BFF (8081) se exponen al exterior: los servicios
+# de dominio, el orquestador de la Saga y la pasarela viven en la red interna.
+#
+# Prometheus y Grafana viven en el perfil "observability" para no exponer
+# herramientas de instrumentación fuera del sistema de negocio:
+#   docker compose --profile observability up -d
+
+name: ticketera
+
+x-service-build: &service-build
+  context: .
+  dockerfile: backend/Dockerfile
+
+x-service-healthcheck: &service-healthcheck
+  interval: 5s
+  timeout: 3s
+  retries: 20
+  start_period: 5s
+
+x-db-service: &db-service
+  image: postgres:16-alpine
+  environment:
+    POSTGRES_USER: app
+    POSTGRES_PASSWORD: app
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U app -d ${POSTGRES_DB}"]
+    interval: 3s
+    timeout: 3s
+    retries: 30
+
+services:
+  # ---------------------------------------------------------------- datos --
+  butacas_db:
+    <<: *db-service
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: butacas
+    volumes:
+      - butacas_data:/var/lib/postgresql/data
+
+  pagos_db:
+    <<: *db-service
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: pagos
+    volumes:
+      - pagos_data:/var/lib/postgresql/data
+
+  emision_db:
+    <<: *db-service
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: emision
+    volumes:
+      - emision_data:/var/lib/postgresql/data
+
+  compras_db:
+    <<: *db-service
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: compras
+    volumes:
+      - compras_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # ------------------------------------------------- servicios de dominio --
+  butacas:
+    build:
+      <<: *service-build
+      args:
+        SERVICE: butacas
+    environment:
+      SERVICE_NAME: butacas
+      GRPC_PORT: "50051"
+      ADMIN_PORT: "9001"
+      DATABASE_URL: postgresql+psycopg2://app:app@butacas_db:5432/butacas
+    depends_on:
+      butacas_db:
+        condition: service_healthy
+    healthcheck:
+      <<: *service-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9001/healthz').read()"]
+
+  pagos:
+    build:
+      <<: *service-build
+      args:
+        SERVICE: pagos
+    environment:
+      SERVICE_NAME: pagos
+      GRPC_PORT: "50052"
+      ADMIN_PORT: "9002"
+      DATABASE_URL: postgresql+psycopg2://app:app@pagos_db:5432/pagos
+      PASARELA_URL: http://pasarela:9500
+      PASARELA_TIMEOUT: "2.0"
+      PASARELA_MAX_RETRIES: "2"
+      CIRCUIT_FAILURE_THRESHOLD: "3"
+      CIRCUIT_RESET_TIMEOUT: "8.0"
+      CIRCUIT_HALF_OPEN_MAX_CALLS: "1"
+      BULKHEAD_MAX_CONCURRENT: "5"
+      BULKHEAD_MAX_PENDING: "10"
+    depends_on:
+      pagos_db:
+        condition: service_healthy
+      pasarela:
+        condition: service_started
+    healthcheck:
+      <<: *service-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9002/healthz').read()"]
+
+  emision:
+    build:
+      <<: *service-build
+      args:
+        SERVICE: emision
+    environment:
+      SERVICE_NAME: emision
+      GRPC_PORT: "50053"
+      ADMIN_PORT: "9003"
+      DATABASE_URL: postgresql+psycopg2://app:app@emision_db:5432/emision
+      PAGOS_TARGET: pagos:50052
+      GRPC_DEADLINE: "3.0"
+    depends_on:
+      emision_db:
+        condition: service_healthy
+      pagos:
+        condition: service_started
+    healthcheck:
+      <<: *service-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9003/healthz').read()"]
+
+  # ------------------------------------------ orquestador de la Saga --
+  compras:
+    build:
+      <<: *service-build
+      args:
+        SERVICE: compras
+    environment:
+      SERVICE_NAME: compras
+      GRPC_PORT: "50054"
+      ADMIN_PORT: "9004"
+      DATABASE_URL: postgresql+psycopg2://app:app@compras_db:5432/compras
+      BUTACAS_TARGET: butacas:50051
+      PAGOS_TARGET: pagos:50052
+      EMISION_TARGET: emision:50053
+      GRPC_DEADLINE: "5.0"
+    depends_on:
+      compras_db:
+        condition: service_healthy
+      butacas:
+        condition: service_started
+      pagos:
+        condition: service_started
+      emision:
+        condition: service_started
+    healthcheck:
+      <<: *service-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9004/healthz').read()"]
+
+  # ------------------------------- pasarela externa (dependencia frágil) --
+  pasarela:
+    build:
+      <<: *service-build
+      args:
+        SERVICE: pasarela
+    environment:
+      SERVICE_NAME: pasarela
+      PASARELA_PORT: "9500"
+    healthcheck:
+      <<: *service-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:9500/healthz').read()"]
+
+  # ------------------------------------------------------- borde / entrada --
+  gateway:
+    build:
+      <<: *service-build
+      args:
+        SERVICE: gateway
+    environment:
+      SERVICE_NAME: gateway
+      GATEWAY_PORT: "8080"
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-ticketera-dev-secret-cambiar-en-produccion}
+      JWT_ALGORITHM: HS256
+      JWT_TTL_SECONDS: "3600"
+      RATE_LIMIT_PER_MINUTE: "60"
+      RATE_LIMIT_BURST: "20"
+      BUTACAS_TARGET: butacas:50051
+      PAGOS_TARGET: pagos:50052
+      EMISION_TARGET: emision:50053
+      COMPRAS_TARGET: compras:50054
+      BFF_URL: http://bff:8081
+      GRPC_DEADLINE: "5.0"
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      butacas:
+        condition: service_started
+      pagos:
+        condition: service_started
+      emision:
+        condition: service_started
+      compras:
+        condition: service_started
+    healthcheck:
+      <<: *service-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz').read()"]
+
+  bff:
+    build:
+      <<: *service-build
+      args:
+        SERVICE: bff
+    environment:
+      SERVICE_NAME: bff
+      BFF_PORT: "8081"
+      BUTACAS_TARGET: butacas:50051
+      PAGOS_TARGET: pagos:50052
+      EMISION_TARGET: emision:50053
+      COMPRAS_TARGET: compras:50054
+      GRPC_DEADLINE: "5.0"
+    ports:
+      - "8081:8081"
+    depends_on:
+      butacas:
+        condition: service_started
+      pagos:
+        condition: service_started
+      emision:
+        condition: service_started
+      compras:
+        condition: service_started
+    healthcheck:
+      <<: *service-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8081/healthz').read()"]
+
+  # ------------------------------------------------------- observabilidad --
+  prometheus:
+    image: prom/prometheus:latest
+    profiles: ["observability"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    profiles: ["observability"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ADMIN_PASSWORD: ticketera
+      GF_USERS_DEFAULT_THEME: light
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  butacas_data:
+  pagos_data:
+  emision_data:
+  compras_data:
+  prometheus_data:
+  grafana_data:

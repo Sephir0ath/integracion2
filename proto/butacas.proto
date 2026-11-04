@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+// ButacasService owns the seat inventory: availability, reservation and release.
+// A seat row is individually identified so that the same seat can never be sold twice.
+package butacas;
+
+service ButacasService {
+  rpc ListarEventos(ListarEventosRequest) returns (ListarEventosResponse);
+  rpc ListarSecciones(ListarSeccionesRequest) returns (ListarSeccionesResponse);
+  rpc Reservar(ReservarRequest) returns (ReservaResponse);
+  rpc Liberar(LiberarRequest) returns (LiberarResponse);
+  rpc ConsultarReserva(ConsultarReservaRequest) returns (ReservaResponse);
+}
+
+message ListarEventosRequest {}
+
+message Evento {
+  string evento_id = 1;
+  string nombre = 2;
+  string lugar = 3;
+  string fecha = 4; // ISO-8601
+}
+
+message ListarEventosResponse {
+  repeated Evento eventos = 1;
+}
+
+message ListarSeccionesRequest {
+  string evento_id = 1;
+}
+
+message Seccion {
+  string seccion_id = 1;
+  string evento_id = 2;
+  string nombre = 3;
+  int32 capacidad_total = 4;
+  int32 cantidad_disponible = 5;
+}
+
+message ListarSeccionesResponse {
+  repeated Seccion secciones = 1;
+}
+
+message Butaca {
+  string butaca_id = 1;
+  string seccion_id = 2;
+  string fila = 3;
+  int32 numero = 4;
+  string estado = 5;  // LIBRE | RESERVADA | VENDIDA
+  string saga_id = 6; // owner saga when RESERVADA or VENDIDA
+}
+
+message ReservarRequest {
+  string saga_id = 1;
+  string evento_id = 2;
+  string seccion_id = 3;
+  int32 cantidad = 4;
+  string idempotency_key = 5;
+}
+
+message Reserva {
+  string reserva_id = 1;
+  string saga_id = 2;
+  string seccion_id = 3;
+  repeated Butaca butacas = 4;
+  string estado = 5; // ACTIVA | LIBERADA
+  string creada_en = 6;
+}
+
+message ReservaResponse {
+  Reserva reserva = 1;
+  repeated Butaca butacas = 2;
+  string estado = 3; // ACTIVA | LIBERADA | NO_ENCONTRADA
+}
+
+message LiberarRequest {
+  string saga_id = 1;
+  string idempotency_key = 2;
+}
+
+message LiberarResponse {
+  bool liberado = 1;
+  int32 butacas_liberadas = 2;
+  string estado = 3; // LIBERADA | NO_ENCONTRADA
+}
+
+message ConsultarReservaRequest {
+  string saga_id = 1;
+}

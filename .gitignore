@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# Plantilla de .gitignore para el proyecto de ticketera (Unidad 3, Forma I).
+# Stack: Python 3.12 (FastAPI + gRPC) en Docker, frontend web estático,
+# Prometheus + Grafana.
+# ---------------------------------------------------------------------------
+
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# --- Tests y cobertura -----------------------------------------------------
+.pytest_cache/
+.cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# --- Datos locales y artefactos de ejecucion -------------------------------
+*.db
+*.sqlite3
+*.log
+logs/
+data/
+tmp/
+*.tmp
+*.bak
+dump.rdb
+
+# --- Secretos y credenciales ------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# --- Editores y SO ----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Docker -----------------------------------------------------------------
+docker-compose.override.yml
+*.tar
+*.tar.gz
+
+# --- Trabajo ODD (estado local de la sesion) --------------------------------
+# El documento de feature (odd/tasks/<feature>.md) y su bitacora son estado de
+# trabajo local: viven en el disco y no se versionan.
+odd/
+
+# --- Encargo de la unidad (material de catedra) -----------------------------
+Encargo-Unidad3-Forma-I.md
+

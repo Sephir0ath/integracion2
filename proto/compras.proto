@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+// ComprasService is the Saga orchestrator. It owns the saga state and drives
+// the steps forward and the compensations in reverse order.
+package compras;
+
+service ComprasService {
+  rpc IniciarCompra(IniciarCompraRequest) returns (CompraResponse);
+  rpc ConsultarCompra(ConsultarCompraRequest) returns (CompraResponse);
+}
+
+message IniciarCompraRequest {
+  string saga_id = 1; // client supplied idempotency key for the whole purchase
+  string evento_id = 2;
+  string seccion_id = 3;
+  int32 cantidad = 4;
+  string cliente_id = 5;
+  int64 monto_centavos = 6;
+  string moneda = 7;
+}
+
+message Paso {
+  string nombre = 1;    // RESERVAR | COBRAR | EMITIR
+  string resultado = 2; // OK | ERROR | SKIPPED
+  string detalle = 3;
+  string iniciado_en = 4;
+  string finalizado_en = 5;
+}
+
+message Compensacion {
+  string nombre = 1;    // LIBERAR | REEMBOLSAR | ANULAR
+  string resultado = 2; // OK | ERROR
+  string detalle = 3;
+  string finalizado_en = 4;
+}
+
+message Compra {
+  string saga_id = 1;
+  string estado = 2; // PENDIENTE | RUNNING | CONFIRMADA | COMPENSADA | FALLIDA
+  repeated Paso pasos = 3;
+  repeated Compensacion compensaciones = 4;
+  string evento_id = 5;
+  string seccion_id = 6;
+  int32 cantidad = 7;
+  string cliente_id = 8;
+  string error = 9;
+  string actualizada_en = 10;
+}
+
+message CompraResponse {
+  Compra compra = 1;
+  bool idempotente = 2; // true when the answer came from the idempotency store
+}
+
+message ConsultarCompraRequest {
+  string saga_id = 1;
+}

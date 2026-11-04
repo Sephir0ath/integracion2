@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+// EmisionService issues and voids the QR tickets. It never emits a ticket
+// without a confirmed payment (business rule enforced across services).
+package emision;
+
+service EmisionService {
+  rpc Emitir(EmitirRequest) returns (EntradasResponse);
+  rpc Anular(AnularRequest) returns (EntradasResponse);
+  rpc Listar(ListarEntradasRequest) returns (EntradasResponse);
+}
+
+message ButacaRef {
+  string butaca_id = 1;
+  string seccion_id = 2;
+  string fila = 3;
+  int32 numero = 4;
+}
+
+message EmitirRequest {
+  string saga_id = 1;
+  string pago_id = 2;
+  repeated ButacaRef butacas = 3;
+  string idempotency_key = 4;
+}
+
+message AnularRequest {
+  string saga_id = 1;
+  string idempotency_key = 2;
+}
+
+message ListarEntradasRequest {
+  string saga_id = 1;
+}
+
+message Entrada {
+  string entrada_id = 1;
+  string saga_id = 2;
+  string butaca_id = 3;
+  string fila = 4;
+  int32 numero = 5;
+  string qr = 6;
+  string estado = 7; // EMITIDA | ANULADA
+}
+
+message EntradasResponse {
+  repeated Entrada entradas = 1;
+  string estado = 2;  // EMITIDA | ANULADA | NO_ENCONTRADA
+  bool idempotente = 3;
+}

@@ -1,0 +1,15 @@
+# Dependencies shared by every service image.
+fastapi
+uvicorn[standard]
+grpcio
+grpcio-tools
+protobuf
+sqlalchemy
+psycopg2-binary
+pydantic
+httpx
+prometheus-client
+PyJWT
+redis
+pytest
+pytest-asyncio
