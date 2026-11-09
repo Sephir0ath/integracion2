@@ -15,8 +15,7 @@ message IniciarCompraRequest {
   string seccion_id = 3;
   int32 cantidad = 4;
   string cliente_id = 5;
-  int64 monto_centavos = 6;
-  string moneda = 7;
+  string moneda = 6; // el monto lo calcula el dominio, no el cliente
 }
 
 message Paso {
@@ -45,6 +44,8 @@ message Compra {
   string cliente_id = 8;
   string error = 9;
   string actualizada_en = 10;
+  int64 monto_total_centavos = 11; // calculado por el dominio
+  string moneda = 12;
 }
 
 message CompraResponse {

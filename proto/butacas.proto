@@ -7,9 +7,18 @@ package butacas;
 service ButacasService {
   rpc ListarEventos(ListarEventosRequest) returns (ListarEventosResponse);
   rpc ListarSecciones(ListarSeccionesRequest) returns (ListarSeccionesResponse);
+  rpc ListarButacas(ListarButacasRequest) returns (ListarButacasResponse);
   rpc Reservar(ReservarRequest) returns (ReservaResponse);
   rpc Liberar(LiberarRequest) returns (LiberarResponse);
   rpc ConsultarReserva(ConsultarReservaRequest) returns (ReservaResponse);
+
+  // Administracion del recinto (CRUD de eventos y secciones).
+  rpc CrearEvento(CrearEventoRequest) returns (Evento);
+  rpc ActualizarEvento(ActualizarEventoRequest) returns (Evento);
+  rpc EliminarEvento(EliminarEventoRequest) returns (EliminarResponse);
+  rpc CrearSeccion(CrearSeccionRequest) returns (Seccion);
+  rpc ActualizarSeccion(ActualizarSeccionRequest) returns (Seccion);
+  rpc EliminarSeccion(EliminarSeccionRequest) returns (EliminarResponse);
 }
 
 message ListarEventosRequest {}
@@ -35,6 +44,7 @@ message Seccion {
   string nombre = 3;
   int32 capacidad_total = 4;
   int32 cantidad_disponible = 5;
+  int64 precio_centavos = 6; // precio por entrada, en centavos; lo define el dominio
 }
 
 message ListarSeccionesResponse {
@@ -48,6 +58,14 @@ message Butaca {
   int32 numero = 4;
   string estado = 5;  // LIBRE | RESERVADA | VENDIDA
   string saga_id = 6; // owner saga when RESERVADA or VENDIDA
+}
+
+message ListarButacasRequest {
+  string seccion_id = 1;
+}
+
+message ListarButacasResponse {
+  repeated Butaca butacas = 1;
 }
 
 message ReservarRequest {
@@ -65,6 +83,7 @@ message Reserva {
   repeated Butaca butacas = 4;
   string estado = 5; // ACTIVA | LIBERADA
   string creada_en = 6;
+  int64 precio_centavos = 7; // precio de la seccion reservada
 }
 
 message ReservaResponse {
@@ -86,4 +105,45 @@ message LiberarResponse {
 
 message ConsultarReservaRequest {
   string saga_id = 1;
+}
+
+// --- Administracion --------------------------------------------------------
+
+message CrearEventoRequest {
+  string nombre = 1;
+  string lugar = 2;
+  string fecha = 3; // ISO-8601
+}
+
+message ActualizarEventoRequest {
+  string evento_id = 1;
+  string nombre = 2;
+  string lugar = 3;
+  string fecha = 4;
+}
+
+message EliminarEventoRequest {
+  string evento_id = 1;
+}
+
+message CrearSeccionRequest {
+  string evento_id = 1;
+  string nombre = 2;
+  int32 capacidad_total = 3;
+  int64 precio_centavos = 4;
+}
+
+message ActualizarSeccionRequest {
+  string seccion_id = 1;
+  string nombre = 2;
+  int32 capacidad_total = 3;
+  int64 precio_centavos = 4;
+}
+
+message EliminarSeccionRequest {
+  string seccion_id = 1;
+}
+
+message EliminarResponse {
+  bool eliminado = 1;
 }

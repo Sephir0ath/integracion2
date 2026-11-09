@@ -26,7 +26,9 @@ x-db-service: &db-service
     POSTGRES_USER: app
     POSTGRES_PASSWORD: app
   healthcheck:
-    test: ["CMD-SHELL", "pg_isready -U app -d ${POSTGRES_DB}"]
+    # Sin `-d`: el nombre de la base lo define el servicio y no hace falta
+    # para saber si el servidor acepta conexiones.
+    test: ["CMD-SHELL", "pg_isready -U app"]
     interval: 3s
     timeout: 3s
     retries: 30

@@ -26,7 +26,18 @@ RUN mkdir -p /app/gen && python -m grpc_tools.protoc \
 COPY backend/common/ /app/common/
 COPY backend/${SERVICE}/ /app/service/
 
-# Static web UI served by the BFF.
-COPY frontend/web/ /app/frontend/web/
+# La interfaz web la sirve el BFF, asi que solo la imagen del BFF la lleva.
+# El encargo exige que solo el gateway y el BFF queden expuestos al exterior:
+# un contenedor nginx con puerto propio romperia esa regla.
+RUN --mount=type=bind,source=frontend/web,target=/tmp/web,ro \
+    if [ "$SERVICE" = "bff" ]; then \
+        mkdir -p /app/frontend/web && cp -R /tmp/web/. /app/frontend/web/; \
+    fi
+
+# El proceso no necesita privilegios: el codigo, los stubs y el front son de
+# solo lectura, asi que corre como usuario sin privilegios. Limita el dano si
+# un servicio se ve comprometido.
+RUN useradd --create-home --uid 10001 app
+USER app
 
 CMD ["python", "-m", "service.main"]

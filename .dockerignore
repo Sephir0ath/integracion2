@@ -1,0 +1,49 @@
+# Contexto de build: solo lo que la imagen necesita.
+# Sin este archivo Docker envía el repositorio entero al daemon en cada build.
+
+# Control de versiones, estado local y material de catedra.
+.git/
+.gitignore
+.atl/
+odd/
+Encargo-*.md
+
+# Entornos virtuales y artefactos de Python.
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Estado de herramientas y pruebas.
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.playwright-cli/
+.playwright/
+
+# Secretos y configuracion local.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Documentacion e informes: no se sirven desde la imagen.
+docs/
+
+# Salidas locales.
+*.log
+logs/
+data/
+tmp/
+*.db
+*.sqlite3
+
+# Se conservan a proposito: proto/, backend/ y frontend/web/.
