@@ -2,9 +2,17 @@
    Ticketera — lógica del front.
 
    La interfaz habla únicamente con el API Gateway (la puerta de entrada del
-   sistema). Si la API no responde y `modoDemo` está activo, la pantalla
-   funciona con datos de muestra y lo dice: nunca simula un éxito que el
-   backend no devolvió.
+   sistema) y entra a él con un token de verdad: lo pide en
+   `POST /api/v1/auth/token` (de forma perezosa, la primera vez que hace
+   falta) y lo manda en la cabecera `Authorization`. Usa dos identidades: la
+   de **cliente** para las rutas del BFF (`/bff/web/**`: catálogo, plano de la
+   sala, compra y consulta de la saga) y la de **admin** para el CRUD del
+   recinto (`/api/v1/butacas/**`), que el gateway solo abre con rol admin.
+
+   Si la API no responde o el inicio de sesión falla y `modoDemo` está
+   activo, la pantalla funciona con datos de muestra y lo dice: nunca simula
+   un éxito que el backend no devolvió. Un 401 no es "el backend está caído":
+   se renueva el token y se reintenta **una** vez.
    ========================================================================= */
 (function () {
   'use strict';
@@ -15,9 +23,11 @@
   const estado = {
     vista: 'comprar',
     token: null,
+    tokenAdmin: null,
     usuario: null,
     esAdmin: false,
     modoDemo: false,
+    motivoDemo: null,
     aviso: null,
     eventos: [],
     secciones: [],
@@ -92,13 +102,144 @@
     nodo.textContent = estado.aviso.texto;
   }
 
+  /* ------------------------------------------------------- autenticacion */
+  // La interfaz entra al sistema con dos identidades, porque el gateway
+  // distingue los roles: el token de **cliente** para las rutas del BFF
+  // (`/bff/web/**`) y el de **admin** para el CRUD del recinto
+  // (`/api/v1/butacas/**`), que con otro rol responde 403.
+  //
+  // El token se pide de forma perezosa (la primera vez que hace falta) y se
+  // reutiliza mientras siga vigente; la vida la dice el gateway en
+  // `expires_in`. Las credenciales viven en `config.js`, no en el código.
+
+  const expiraciones = { cliente: 0, admin: 0 };
+  const loginsEnCurso = { cliente: null, admin: null };
+  const MARGEN_EXPIRACION_MS = 5000;
+
+  // Por qué se cayó al modo demo: el inicio de sesión falló, la API rechazó
+  // la sesión o la API no respondió. No es lo mismo, y el aviso lo dice.
+  const AVISOS_DEMO = {
+    login: 'No se pudo iniciar sesión en la API: se muestran datos de demostración.',
+    'no-autorizado': 'La API rechazó la sesión (401): se muestran datos de demostración.',
+    'sin-respuesta': 'Sin respuesta de la API: se muestran datos de demostración.',
+  };
+
+  function credencialesDe(identidad) {
+    if (identidad === 'admin') return { email: cfg.correoAdmin, password: cfg.claveAdmin };
+    return { email: cfg.correoCliente, password: cfg.claveCliente };
+  }
+
+  function guardarToken(identidad, datos) {
+    if (identidad === 'admin') {
+      estado.tokenAdmin = datos.access_token;
+      estado.esAdmin = true;
+    } else {
+      estado.token = datos.access_token;
+      estado.usuario = {
+        email: credencialesDe('cliente').email,
+        rol: datos.role || 'cliente',
+        cliente_id: datos.cliente_id || '',
+      };
+    }
+    expiraciones[identidad] = Date.now() + (Number(datos.expires_in) || 3600) * 1000;
+    if (identidad !== 'admin') mostrarSesion();
+    return datos.access_token;
+  }
+
+  function tokenVigente(identidad) {
+    const token = identidad === 'admin' ? estado.tokenAdmin : estado.token;
+    if (!token) return null;
+    // Se renueva un poco antes de expirar: el token vive una hora, pero el
+    // reloj del navegador y el del gateway no tienen por qué coincidir.
+    if (Date.now() >= expiraciones[identidad] - MARGEN_EXPIRACION_MS) return null;
+    return token;
+  }
+
+  async function pedirToken(identidad) {
+    const { email, password } = credencialesDe(identidad);
+    let respuesta;
+    try {
+      respuesta = await fetch(cfg.apiBase + '/api/v1/auth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+    } catch (error) {
+      // El gateway no respondió: no es un problema de credenciales, es que
+      // la API no está.
+      const fallo = new Error('el gateway no respondió: ' + error.message);
+      fallo.origen = 'sin-respuesta';
+      throw fallo;
+    }
+    if (!respuesta.ok) {
+      const fallo = new Error('el gateway rechazó las credenciales (HTTP ' + respuesta.status + ')');
+      fallo.origen = 'login';
+      fallo.status = respuesta.status;
+      throw fallo;
+    }
+    const datos = await respuesta.json();
+    if (!datos || !datos.access_token) {
+      const fallo = new Error('el gateway no devolvió un token');
+      fallo.origen = 'login';
+      throw fallo;
+    }
+    return guardarToken(identidad, datos);
+  }
+
+  // El token se pide una sola vez mientras siga vigente. Si dos pedidos lo
+  // necesitan al mismo tiempo, ambos esperan al mismo inicio de sesión.
+  async function obtenerToken(identidad, forzar) {
+    if (!forzar) {
+      const vigente = tokenVigente(identidad);
+      if (vigente) return vigente;
+      if (loginsEnCurso[identidad]) return loginsEnCurso[identidad];
+    }
+    const promesa = pedirToken(identidad);
+    loginsEnCurso[identidad] = promesa;
+    try {
+      return await promesa;
+    } finally {
+      if (loginsEnCurso[identidad] === promesa) loginsEnCurso[identidad] = null;
+    }
+  }
+
+  function motivoDe(error) {
+    if (error && error.origen === 'login') return 'login';
+    if (error && error.origen === 'sin-respuesta') return 'sin-respuesta';
+    if (error && error.status === 401) return 'no-autorizado';
+    return 'sin-respuesta';
+  }
+
   /* ------------------------------------------------------------------ HTTP */
+  // Las rutas de escritura del recinto las atiende el gateway solo con rol
+  // admin: con el token de cliente responden 403.
+  function identidadDe(ruta, metodo) {
+    const verbo = (metodo || 'GET').toUpperCase();
+    if (verbo !== 'GET' && verbo !== 'HEAD' && ruta.indexOf('/api/v1/butacas/') === 0) return 'admin';
+    return 'cliente';
+  }
+
   async function pedir(ruta, opciones) {
     const config = Object.assign({ headers: {} }, opciones || {});
     config.headers = Object.assign({ 'Content-Type': 'application/json' }, config.headers);
-    if (estado.token) config.headers.Authorization = 'Bearer ' + estado.token;
+    const identidad = config.identidad || identidadDe(ruta, config.method);
+    delete config.identidad; // no es una opción de `fetch`
+    return pedirConReintento(ruta, config, identidad, true);
+  }
+
+  async function pedirConReintento(ruta, config, identidad, permitirReintento) {
+    const token = await obtenerToken(identidad, false);
+    if (token) config.headers.Authorization = 'Bearer ' + token;
 
     const respuesta = await fetch(cfg.apiBase + ruta, config);
+    if (respuesta.status === 401 && permitirReintento) {
+      // El token venció (vive una hora) o el gateway se reinició con otro
+      // secreto: se pide uno nuevo y se reintenta **una** vez. Un 401 no es
+      // "el backend está caído". El cuerpo es un texto (JSON serializado),
+      // así que el reintento puede repetir la misma petición.
+      await obtenerToken(identidad, true);
+      return pedirConReintento(ruta, config, identidad, false);
+    }
     if (!respuesta.ok) {
       const cuerpo = await respuesta.text();
       let detalle = cuerpo;
@@ -158,6 +299,7 @@
       try {
         const datos = await pedir('/bff/web/catalogo');
         estado.modoDemo = false;
+        estado.motivoDemo = null;
         estado.eventos = datos.eventos || [];
         estado.secciones = datos.secciones || [];
         estado.metodosPago = datos.metodos_pago || [];
@@ -166,6 +308,7 @@
       } catch (error) {
         if (!cfg.modoDemo) throw error;
         estado.modoDemo = true;
+        estado.motivoDemo = motivoDe(error);
         estado.pagosDisponible = true;
         cargarDemo();
       }
@@ -179,6 +322,7 @@
       } catch (error) {
         if (!cfg.modoDemo) throw error;
         estado.modoDemo = true;
+        estado.motivoDemo = motivoDe(error);
         return (estado.butacasPorSeccion[seccionId] || []).slice();
       }
     },
@@ -233,7 +377,11 @@
         guardarLocal();
         return evento;
       }
-      return pedir('/api/v1/butacas/eventos', { method: 'POST', body: JSON.stringify(datos) });
+      return pedir('/api/v1/butacas/eventos', {
+        method: 'POST',
+        identidad: 'admin',
+        body: JSON.stringify(datos),
+      });
     },
 
     async actualizarEvento(eventoId, datos) {
@@ -245,6 +393,7 @@
       }
       return pedir('/api/v1/butacas/eventos/' + encodeURIComponent(eventoId), {
         method: 'PUT',
+        identidad: 'admin',
         body: JSON.stringify(datos),
       });
     },
@@ -256,7 +405,10 @@
         guardarLocal();
         return null;
       }
-      return pedir('/api/v1/butacas/eventos/' + encodeURIComponent(eventoId), { method: 'DELETE' });
+      return pedir('/api/v1/butacas/eventos/' + encodeURIComponent(eventoId), {
+        method: 'DELETE',
+        identidad: 'admin',
+      });
     },
 
     async crearSeccion(datos) {
@@ -267,7 +419,11 @@
         guardarLocal();
         return seccion;
       }
-      return pedir('/api/v1/butacas/secciones', { method: 'POST', body: JSON.stringify(datos) });
+      return pedir('/api/v1/butacas/secciones', {
+        method: 'POST',
+        identidad: 'admin',
+        body: JSON.stringify(datos),
+      });
     },
 
     async actualizarSeccion(seccionId, datos) {
@@ -279,6 +435,7 @@
       }
       return pedir('/api/v1/butacas/secciones/' + encodeURIComponent(seccionId), {
         method: 'PUT',
+        identidad: 'admin',
         body: JSON.stringify(datos),
       });
     },
@@ -289,7 +446,10 @@
         guardarLocal();
         return null;
       }
-      return pedir('/api/v1/butacas/secciones/' + encodeURIComponent(seccionId), { method: 'DELETE' });
+      return pedir('/api/v1/butacas/secciones/' + encodeURIComponent(seccionId), {
+        method: 'DELETE',
+        identidad: 'admin',
+      });
     },
   };
 
@@ -879,6 +1039,23 @@
   }
 
   /* ------------------------------------------------------------ navegación */
+  // La barra muestra con qué identidad se está trabajando: el correo con el
+  // que el gateway abrió la sesión.
+  function mostrarSesion() {
+    const nodo = $('#sesion');
+    const boton = $('#salir');
+    if (!nodo || !boton) return;
+    if (estado.token) {
+      nodo.textContent = estado.usuario ? estado.usuario.email : 'sesión iniciada';
+      nodo.hidden = false;
+      boton.hidden = false;
+    } else {
+      nodo.textContent = '';
+      nodo.hidden = true;
+      boton.hidden = true;
+    }
+  }
+
   function cambiarVista(vista) {
     estado.vista = vista;
     $('#vista-comprar').hidden = vista !== 'comprar';
@@ -917,10 +1094,15 @@
     });
 
     $('#salir').addEventListener('click', () => {
+      // Cerrar la sesión olvida los dos tokens: el siguiente pedido vuelve a
+      // pedir credenciales al gateway.
       estado.token = null;
+      estado.tokenAdmin = null;
       estado.usuario = null;
-      $('#sesion').hidden = true;
-      $('#salir').hidden = true;
+      estado.esAdmin = false;
+      expiraciones.cliente = 0;
+      expiraciones.admin = 0;
+      mostrarSesion();
       aviso('Sesión cerrada. El siguiente pedido volverá a pedir credenciales.', 'info');
     });
   }
@@ -931,10 +1113,12 @@
     await repo.catalogo();
 
     if (estado.modoDemo) {
-      aviso('Sin respuesta de la API: se muestran datos de demostración.', 'info');
+      aviso(AVISOS_DEMO[estado.motivoDemo] || AVISOS_DEMO['sin-respuesta'], 'info');
     } else if (estado.pagosDisponible === false) {
       aviso('El servicio de pagos está degradado: se puede ver el catálogo, pero no comprar.', 'error');
     }
+
+    mostrarSesion();
 
     if (estado.eventos.length) {
       await seleccionarEvento(estado.eventos[0].evento_id);
@@ -942,6 +1126,12 @@
       renderSala();
     }
   }
+
+  // Sonda para las pruebas automatizadas del front (`node --test
+  // frontend/web/tests/`): expone el estado y el repositorio para poder
+  // comprobar el flujo de autenticación sin navegador. No cambia el
+  // comportamiento de la interfaz.
+  window.TICKETERA_APP = { estado, repo, pedir, iniciar };
 
   document.addEventListener('DOMContentLoaded', iniciar);
 })();

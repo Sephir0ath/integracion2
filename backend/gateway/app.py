@@ -38,12 +38,14 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
@@ -72,6 +74,20 @@ logger = logging.getLogger("gateway.app")
 # Cabeceras con las que viaja la identidad del cliente.
 CABECERA_CLIENTE = "X-Client-Id"
 CABECERA_ROL = "X-Role"
+
+# Origenes que el navegador puede usar para llamar al gateway.
+#
+# La interfaz web se sirve en el BFF (8081) y habla con el gateway (8080):
+# para el navegador son **origenes distintos**, asi que hace falta CORS. Sin
+# esto el navegador bloquea la llamada antes de que salga de la maquina, y el
+# preflight (OPTIONS) vuelve 405 sin cabeceras `access-control-*`.
+ORIGENES_CORS_POR_DEFECTO = "http://localhost:8081,http://127.0.0.1:8081"
+
+
+def _origenes_cors() -> list[str]:
+    """Los origenes permitidos, de `CORS_ORIGINS` o los de por defecto."""
+    valor = os.getenv("CORS_ORIGINS") or ORIGENES_CORS_POR_DEFECTO
+    return [origen.strip() for origen in valor.split(",") if origen.strip()]
 
 
 # ---------------------------------------------------------------- cuerpos --
@@ -441,6 +457,12 @@ def crear_app(
         if autorizacion:
             cabeceras["Authorization"] = autorizacion
 
+        # El tipo de contenido tambien viaja: sin el, el BFF recibe el cuerpo
+        # sin saber si es JSON y lo rechaza.
+        tipo_contenido = request.headers.get("content-type")
+        if tipo_contenido:
+            cabeceras["Content-Type"] = tipo_contenido
+
         respuesta = await cliente_bff.enviar(
             request.method,
             f"/bff/web/{ruta}",
@@ -456,6 +478,15 @@ def crear_app(
             status_code=respuesta.estado,
             headers=cabeceras_respuesta,
         )
+
+    # CORS: la interfaz vive en el BFF (8081) y llama al gateway (8080).
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_origenes_cors(),
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Client-Id", "X-Role"],
+    )
 
     return app
 
