@@ -189,10 +189,10 @@
         // y queda etiquetada como simulación, para no parecer un cobro real.
         const seccion = estado.secciones.find((s) => s.seccion_id === payload.seccion_id);
         const candidatas = estado.butacasPorSeccion[payload.seccion_id] || [];
-        const seleccion = payload.butacas_seleccionadas && payload.butacas_seleccionadas.length
-          ? candidatas.filter((b) => payload.butacas_seleccionadas.includes(b.butaca_id))
+        const seleccion = payload.butaca_ids && payload.butaca_ids.length
+          ? candidatas.filter((b) => payload.butaca_ids.includes(b.butaca_id))
           : [];
-        const total = (seccion ? seccion.precio_centavos : 0) * payload.cantidad;
+        const total = (seccion ? seccion.precio_centavos : 0) * (payload.butaca_ids || []).length;
         return {
           simulado: true,
           compra: {
@@ -556,12 +556,13 @@
     if (boton) boton.disabled = true;
 
     const sagaId = idUnico();
+    const butacasElegidas = seleccion.map((b) => b.butaca_id);
     try {
       const resultado = await repo.comprar({
         saga_id: sagaId,
         evento_id: estado.eventoId,
         seccion_id: seccion.seccion_id,
-        cantidad: seleccion.length,
+        butaca_ids: butacasElegidas,
       });
 
       const compra = resultado.compra || {};

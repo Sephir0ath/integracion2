@@ -10,6 +10,7 @@ service ButacasService {
   rpc ListarButacas(ListarButacasRequest) returns (ListarButacasResponse);
   rpc Reservar(ReservarRequest) returns (ReservaResponse);
   rpc Liberar(LiberarRequest) returns (LiberarResponse);
+  rpc ConfirmarVenta(ConfirmarVentaRequest) returns (ConfirmarVentaResponse);
   rpc ConsultarReserva(ConsultarReservaRequest) returns (ReservaResponse);
 
   // Administracion del recinto (CRUD de eventos y secciones).
@@ -72,7 +73,10 @@ message ReservarRequest {
   string saga_id = 1;
   string evento_id = 2;
   string seccion_id = 3;
-  int32 cantidad = 4;
+  // Las butacas exactas que eligio el comprador. Se reservan una por una,
+  // de forma atomica: si alguna ya no esta libre, la reserva se rechaza
+  // entera (regla: una butaca no se vende dos veces).
+  repeated string butaca_ids = 4;
   string idempotency_key = 5;
 }
 
@@ -81,7 +85,7 @@ message Reserva {
   string saga_id = 2;
   string seccion_id = 3;
   repeated Butaca butacas = 4;
-  string estado = 5; // ACTIVA | LIBERADA
+  string estado = 5; // ACTIVA | LIBERADA | VENDIDA
   string creada_en = 6;
   int64 precio_centavos = 7; // precio de la seccion reservada
 }
@@ -95,6 +99,19 @@ message ReservaResponse {
 message LiberarRequest {
   string saga_id = 1;
   string idempotency_key = 2;
+}
+
+// Cierre de la venta: las butacas reservadas pasan a VENDIDA cuando la saga
+// termina bien. No es un paso mas de la saga, es la transicion de estado que
+// completa la reserva.
+message ConfirmarVentaRequest {
+  string saga_id = 1;
+}
+
+message ConfirmarVentaResponse {
+  bool confirmada = 1;
+  int32 butacas_confirmadas = 2;
+  string estado = 3; // VENDIDA | NO_ENCONTRADA
 }
 
 message LiberarResponse {

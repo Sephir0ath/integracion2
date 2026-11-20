@@ -13,7 +13,9 @@ message IniciarCompraRequest {
   string saga_id = 1; // client supplied idempotency key for the whole purchase
   string evento_id = 2;
   string seccion_id = 3;
-  int32 cantidad = 4;
+  // Las butacas exactas que eligio el comprador; `compras` las pasa a
+  // `butacas.Reservar`.
+  repeated string butaca_ids = 4;
   string cliente_id = 5;
   string moneda = 6; // el monto lo calcula el dominio, no el cliente
 }
