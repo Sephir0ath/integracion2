@@ -45,6 +45,35 @@ def sesiones(engine):
 
 
 @pytest.fixture()
+def motor_con_fk(tmp_path):
+    """Engine over a temporary SQLite file **with the foreign keys enforced**.
+
+    SQLite does not enforce them by default, and that is exactly why the
+    suite never noticed that the seats of a new section were written before
+    the section they point to: the database accepted rows that PostgreSQL
+    rejects with a `ForeignKeyViolation`.
+    """
+    url = f"sqlite:///{tmp_path / 'butacas_fk.db'}"
+    motor = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
+
+    @event.listens_for(motor, "connect")
+    def _forzar_fk(dbapi_connection, connection_record):  # pragma: no cover - event listener
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    init_schema(motor, Base)
+    yield motor
+    motor.dispose()
+
+
+@pytest.fixture()
+def servicio_con_fk(motor_con_fk):
+    """Domain service over a base that enforces the foreign keys."""
+    return ButacasService(lambda: session_scope(motor_con_fk))
+
+
+@pytest.fixture()
 def servicio(sesiones):
     """Domain service of the `butacas` service."""
     return ButacasService(sesiones)

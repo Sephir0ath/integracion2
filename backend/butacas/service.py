@@ -777,8 +777,15 @@ class ButacasService:
                 ).scalars().all()
                 for butaca in butacas:
                     session.delete(butaca)
+                # El borrado se hace por niveles y con un flush entre ellos:
+                # las butacas apuntan a la seccion y la seccion al evento, y
+                # la base rechaza borrar una fila que todavia la referencia.
+                # Sin estos flush, SQLAlchemy borra el evento antes que sus
+                # secciones (no hay relationship() que le indique el orden).
+                session.flush()
                 for seccion in secciones:
                     session.delete(seccion)
+                session.flush()
             session.delete(evento)
             session.flush()
             conteo = _conteo_por_estado(session)
@@ -819,6 +826,12 @@ class ButacasService:
                 precio_centavos=precio,
             )
             session.add(seccion)
+            # La seccion se escribe **antes** que sus butacas: las filas de
+            # `butaca` apuntan a la seccion y la base rechaza una butaca
+            # cuya seccion todavia no existe. Sin este flush, SQLAlchemy
+            # inserta en el orden de los mappers (butaca antes que seccion)
+            # y la operacion falla con una violacion de clave foranea.
+            session.flush()
             for butaca in crear_butacas(seccion_id, capacidad):
                 session.add(Butaca(**butaca))
             session.flush()

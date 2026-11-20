@@ -726,24 +726,24 @@
       });
 
       const compra = resultado.compra || {};
+      const estadoSaga = compra.estado || 'CONFIRMADA';
       estado.entradas.unshift({
         saga_id: sagaId,
-        estado: compra.estado || 'CONFIRMADA',
+        estado: estadoSaga,
         simulado: Boolean(resultado.simulado),
         evento: eventoActual(),
         seccion: seccion,
         butacas: seleccion.map((b) => ({ butaca_id: b.butaca_id, fila: b.fila, numero: b.numero })),
         entradas: resultado.entradas || [],
-        monto: resultado.monto_total_centavos || seleccion.length * seccion.precio_centavos,
-        moneda: resultado.moneda || 'CLP',
+        monto:
+          compra.monto_total_centavos ||
+          resultado.monto_total_centavos ||
+          seleccion.length * seccion.precio_centavos,
+        moneda: compra.moneda || resultado.moneda || 'CLP',
       });
       guardarLocal();
-      aviso(
-        resultado.simulado
-          ? 'Simulación local: el backend no está conectado, así que no se ejecutó ninguna Saga.'
-          : 'Entradas compradas.',
-        'info'
-      );
+      const mensaje = mensajeDeCompra(resultado, estadoSaga);
+      aviso(mensaje.texto, mensaje.nivel);
       estado.seleccion.clear();
       renderPlano();
       renderCarrito();
@@ -752,6 +752,42 @@
       aviso('No se pudo completar la compra: ' + error.message, 'error');
       if (boton) boton.disabled = false;
     }
+  }
+
+  /**
+   * El aviso de la compra depende de **como termino la saga**. Anunciar
+   * "Entradas compradas" cuando la saga quedo compensada (el pago se
+   * revirtio y no se emitieron entradas) seria mentirle a la persona.
+   *
+   * @param {object} resultado lo que devolvio el repositorio
+   * @param {string} estadoSaga estado final de la saga
+   * @returns {{texto: string, nivel: string}}
+   */
+  function mensajeDeCompra(resultado, estadoSaga) {
+    if (resultado.simulado) {
+      return {
+        texto:
+          'Simulación local: el backend no está conectado, así que no se ejecutó ninguna Saga.',
+        nivel: 'info',
+      };
+    }
+    if (estadoSaga === 'CONFIRMADA') {
+      return { texto: 'Entradas compradas.', nivel: 'info' };
+    }
+    if (estadoSaga === 'COMPENSADA') {
+      return {
+        texto:
+          'La compra no se pudo completar: se revirtió el pago y no se emitieron entradas.',
+        nivel: 'error',
+      };
+    }
+    const detalle = String((resultado.compra && resultado.compra.error) || '').trim();
+    return {
+      texto: detalle
+        ? 'No se pudo completar la compra: ' + detalle
+        : 'No se pudo completar la compra.',
+      nivel: 'error',
+    };
   }
 
   /* -------------------------------------------------------------- stub */
@@ -898,7 +934,11 @@
       borrar.addEventListener('click', async () => {
         if (!window.confirm('¿Eliminar "' + evento.nombre + '"?')) return;
         await repo.eliminarEvento(evento.evento_id);
+        // Igual que al guardar: se recarga el catálogo para que la fila
+        // desaparezca de verdad y no quede una foto del estado anterior.
+        await repo.catalogo();
         renderAdmin();
+        renderPrograma();
       });
       acciones.appendChild(borrar);
 
@@ -936,7 +976,9 @@
       borrar.addEventListener('click', async () => {
         if (!window.confirm('¿Eliminar la sección "' + seccion.nombre + '"?')) return;
         await repo.eliminarSeccion(seccion.seccion_id);
+        await repo.catalogo();
         renderSecciones();
+        renderPrograma();
       });
       acciones.appendChild(borrar);
 
@@ -948,6 +990,9 @@
   function editarEvento(evento) {
     estado.editandoEvento = evento ? evento.evento_id : null;
     const formulario = $('#formulario-evento');
+    // El formulario arranca oculto (como el de secciones): el botón que lo
+    // abre es el que decide si se crea un evento o se edita uno existente.
+    formulario.hidden = false;
     $('#formulario-titulo').textContent = evento ? 'Editar evento' : 'Nuevo evento';
     formulario.nombre.value = evento ? evento.nombre : '';
     formulario.lugar.value = evento ? evento.lugar : '';
@@ -989,6 +1034,10 @@
         await repo.crearEvento(datos);
       }
       editarEvento(null);
+      $('#formulario-evento').hidden = true;
+      // Recarga el catálogo: sin esto la tabla y el programa seguirían
+      // mostrando la lista anterior y el guardado no se vería en pantalla.
+      await repo.catalogo();
       renderAdmin();
       renderPrograma();
       aviso('Evento guardado.', 'info');
@@ -1029,6 +1078,7 @@
       }
       editarSeccion(null);
       $('#formulario-seccion').hidden = true;
+      await repo.catalogo();
       renderSecciones();
       renderPrograma();
       aviso('Sección guardada.', 'info');
@@ -1077,7 +1127,10 @@
     }
 
     $('#nuevo-evento').addEventListener('click', () => editarEvento(null));
-    $('#cancelar-evento').addEventListener('click', () => editarEvento(null));
+    $('#cancelar-evento').addEventListener('click', () => {
+      editarEvento(null);
+      $('#formulario-evento').hidden = true;
+    });
     $('#formulario-evento').addEventListener('submit', (eventoEnvio) => {
       eventoEnvio.preventDefault();
       guardarEvento(eventoEnvio.target);

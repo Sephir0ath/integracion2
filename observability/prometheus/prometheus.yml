@@ -1,0 +1,88 @@
+# Configuracion de Prometheus para la ticketera.
+#
+# Prometheus **no recibe datos**: los pide. Cada 15 segundos le pregunta a
+# cada servicio "como vas?" y guarda la respuesta como una serie de tiempo.
+# Por eso no hay que instrumentar nada mas: los servicios ya exponen
+# `/metrics` (el `prometheus_client` de Python, con el registro comun de
+# `backend/common/metrics.py`).
+#
+# Cada servicio expone sus metricas en un puerto distinto:
+#
+#   - el gateway y el BFF, en sus puertos publicados (8080 y 8081);
+#   - los servicios de dominio, en su **puerto admin** (9001 a 9004), que es
+#     el mismo donde viven `/healthz` y `/metrics` (`backend/common/grpc.py`);
+#   - la pasarela externa, en su propio puerto (9500).
+#
+# Los nombres son los de los servicios dentro de la red de compose, no
+# `localhost`: Prometheus corre en un contenedor y habla con sus hermanos.
+#
+# Este archivo lo monta el compose en modo solo lectura:
+#   ./observability/prometheus/prometheus.yml -> /etc/prometheus/prometheus.yml
+# y el perfil "observability" lo levanta aparte del `docker compose up` de la
+# aplicacion:
+#   docker compose --profile observability up -d prometheus
+
+global:
+  # Cada 15 segundos se lee el /metrics de cada objetivo. Es el periodo que
+  # usa el enunciado como referencia para las capturas de la evidencia.
+  scrape_interval: 15s
+  # Frecuencia de las reglas de evaluacion (Prometheus las usa para alerting).
+  evaluation_interval: 15s
+  external_labels:
+    sistema: ticketera
+
+scrape_configs:
+  # ---------------------------------------------------------------- borde --
+  # El gateway: peticiones por ruta y estado, latencia y limite de
+  # peticiones (los 429 del token bucket).
+  - job_name: gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - gateway:8080
+
+  # El BFF: agregaciones y degradacion elegante.
+  - job_name: bff
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - bff:8081
+
+  # ------------------------------------------------------------- dominios --
+  # Cada dominio va en su propio job: la etiqueta `job` queda con el nombre
+  # del servicio y los dashboards filtran sin ambiguedad.
+  - job_name: butacas
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - butacas:9001
+
+  - job_name: pagos
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - pagos:9002
+
+  - job_name: emision
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - emision:9003
+
+  - job_name: compras
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - compras:9004
+
+  # ----------------------------------------------------- dependencia fragil --
+  # La pasarela externa: es la dependencia que se pone lenta y se cae. Aqui
+  # se ven el **circuit breaker** (estado, transiciones y llamadas
+  # rechazadas en fail-fast) y el **bulkhead** (ocupacion y rechazos): son
+  # las metricas del "antes y despues" que pide el escenario de falla en
+  # cascada contenida.
+  - job_name: pasarela
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - pasarela:9500

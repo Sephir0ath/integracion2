@@ -1,0 +1,14 @@
+{
+  "name": "ticketera-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pruebas end-to-end de la ticketera con Playwright (navegador real contra el sistema dockerizado).",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "HEADED=1 playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}
