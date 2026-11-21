@@ -26,9 +26,13 @@ x-db-service: &db-service
     POSTGRES_USER: app
     POSTGRES_PASSWORD: app
   healthcheck:
-    # Sin `-d`: el nombre de la base lo define el servicio y no hace falta
-    # para saber si el servidor acepta conexiones.
-    test: ["CMD-SHELL", "pg_isready -U app"]
+    # `-d postgres`: se sondea la base de mantenimiento, que existe siempre.
+    # Sin `-d`, `pg_isready` intenta la base llamada como el usuario (`app`),
+    # que no existe: el servidor registraba un `FATAL` cada 3 s aunque el
+    # contenedor quedara healthy (pg_isready reintenta con `postgres` y
+    # sale con 0). Con `-d postgres` el sondeo es limpio y la salud se
+    # evalua igual: que el servidor acepte conexiones.
+    test: ["CMD-SHELL", "pg_isready -U app -d postgres"]
     interval: 3s
     timeout: 3s
     retries: 30

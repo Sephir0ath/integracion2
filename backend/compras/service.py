@@ -200,7 +200,13 @@ class ComprasService:
             "pago_id": "",
         }
 
-        estado, error_texto = await self._ejecutar(saga_id, contexto)
+        # La saga no depende de que el cliente siga esperando: si se va
+        # (por ejemplo porque el borde ya cumplio su deadline), la saga
+        # sigue y compensa sola. Sin el escudo, la cancelacion del request
+        # mataba la saga a mitad de camino y la butaca quedaba reservada
+        # para siempre, sin compensacion.
+        tarea = asyncio.create_task(self._ejecutar(saga_id, contexto))
+        estado, error_texto = await asyncio.shield(tarea)
 
         datos = self._respuesta(saga_id, idempotente=False)
         if datos is None:  # pragma: no cover - el estado se acaba de escribir

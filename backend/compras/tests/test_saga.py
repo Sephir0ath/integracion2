@@ -10,6 +10,9 @@ the tests assert the order of the calls, not only that they happened.
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 import pytest
 
 from common.errors import CODES, ServiceError
@@ -248,3 +251,56 @@ async def test_una_compra_sin_butacas_es_invalida(servicio):
         await _compra(servicio, butaca_ids=[])
 
     assert excepcion.value.code == CODES.INVALID
+
+
+async def test_una_dependencia_lenta_no_deja_la_saga_colgada(sesiones, llamadas, butacas, emision):
+    """A dependency that does not answer leaves the saga compensated, not hanging.
+
+    The deadline of the orchestrator has to be honored: before, the step
+    never reached the error path (the deadline waited for the cancellation
+    of a call that took long to wind down), so the saga stayed `RUNNING`
+    forever, with its seat reserved and without compensating anything.
+    """
+    from ..service import ComprasService
+
+    # El pago tarda mas que el deadline del orquestador.
+    # La llamada ignora la cancelacion, como una gRPC en vuelo.
+    pagos = FakePagos(llamadas, delay=2.0, ignora_cancelacion=True)
+    servicio = ComprasService(sesiones, butacas, pagos, emision, deadline=0.2)
+
+    inicio = time.perf_counter()
+    resultado = await _compra(servicio)
+    elapsed = time.perf_counter() - inicio
+
+    assert resultado["estado"] == "COMPENSADA"
+    assert elapsed < 1.0, f"el deadline no se cumplio ({elapsed:.2f}s)"
+    # La butaca se libero: no queda reservada por una saga colgada.
+    assert llamadas.nombres == ["butacas.reservar", "pagos.cobrar", "butacas.liberar"]
+    assert [comp["nombre"] for comp in resultado["compensaciones"]] == ["LIBERAR"]
+
+
+async def test_la_saga_termina_although_el_cliente_cancele(sesiones, llamadas, butacas, emision):
+    """The saga completes and compensates even if the client goes away.
+
+    The client can disappear: the edge has its own deadline and gives up
+    when it is met. The saga is not tied to the request, so it keeps
+    running and compensates the seat it had reserved; otherwise the seat
+    stayed reserved forever, with the saga stuck in `RUNNING`.
+    """
+    from ..service import ComprasService
+
+    pagos = FakePagos(llamadas, delay=2.0, ignora_cancelacion=True)
+    servicio = ComprasService(sesiones, butacas, pagos, emision, deadline=0.2)
+
+    tarea = asyncio.create_task(_compra(servicio))
+    await asyncio.sleep(0.05)
+    tarea.cancel()  # el cliente se va
+    with pytest.raises(asyncio.CancelledError):
+        await tarea
+
+    # La saga sigue en segundo plano: se le da tiempo a que termine.
+    await asyncio.sleep(0.8)
+
+    saga = await servicio.consultar_compra("saga-1")
+    assert saga["estado"] == "COMPENSADA"
+    assert "butacas.liberar" in llamadas.nombres

@@ -9,6 +9,7 @@ The network is replaced by `FakeTransport`, so no pasarela is running.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 import pytest
@@ -304,3 +305,36 @@ async def test_las_metricas_registran_las_llamadas_a_la_pasarela():
 
     assert despues_ok == antes_ok + 1
     assert despues_error == antes_error + 1
+
+
+async def test_el_circuito_abre_a_tiempo_con_la_dependencia_lenta():
+    """With a slow dependency the circuit opens and the next call fails fast.
+
+    The circuit has to see **every** failed attempt, not only the last one
+    of the retry sequence: with the breaker around the retries it only
+    learned that the dependency was broken after the whole sequence, so
+    with a slow dependency (the one that causes the cascading failure) it
+    never reached the threshold and every call ate the whole timeout.
+    """
+
+    async def lento(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("tarde", request=request)
+
+    cliente, transporte = _cliente(
+        lento, pasarela_timeout=0.05, pasarela_max_retries=2, circuit_failure_threshold=3
+    )
+
+    # La primera llamada agota sus intentos y el circuito queda abierto.
+    with pytest.raises(ServiceError):
+        await cliente.cobrar(1000, "saga-1:COBRAR")
+    assert len(transporte.llamadas) == 3
+
+    # La siguiente falla al instante, sin volver a tocar la dependencia.
+    inicio = time.perf_counter()
+    with pytest.raises(ServiceError) as error:
+        await cliente.cobrar(1000, "saga-2:COBRAR")
+    elapsed = time.perf_counter() - inicio
+
+    assert error.value.code == CODES.CIRCUIT_OPEN
+    assert elapsed < 0.5, f"la llamada no fue fail-fast ({elapsed:.2f}s)"
+    assert len(transporte.llamadas) == 3

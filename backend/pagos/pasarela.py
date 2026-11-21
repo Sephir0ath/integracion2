@@ -134,8 +134,17 @@ class PasarelaClient:
             return await self._http(metodo, ruta, cuerpo)
 
         async def _con_reintentos():
+            # El circuito va **dentro** del reintento y no al reves: asi cada
+            # intento fallido cuenta como fallo y el circuito abre a tiempo.
+            # Con el circuito por fuera, el breaker solo veia el fallo al
+            # final de la secuencia de reintentos: con la dependencia lenta
+            # (que es justo lo que provoca la falla en cascada) nunca
+            # llegaba al umbral y cada llamada se comia el timeout entero.
+            # Un circuito abierto corta el reintento: `CircuitOpenError` no
+            # es transitorio, asi que no se reintenta contra una dependencia
+            # que ya se sabe mala.
             return await with_retry(
-                _intento,
+                lambda: self.breaker.call(_intento),
                 attempts=self._settings.pasarela_max_retries + 1,
                 base_delay=self._retry_base_delay,
                 max_delay=self._retry_max_delay,
@@ -144,7 +153,7 @@ class PasarelaClient:
             )
 
         try:
-            resultado = await self.bulkhead.run(lambda: self.breaker.call(_con_reintentos))
+            resultado = await self.bulkhead.run(_con_reintentos)
         except BulkheadRejected as exc:
             # Our own load shedding: it is not a failure of the dependency,
             # so the circuit must not count it.

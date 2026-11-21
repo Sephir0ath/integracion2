@@ -43,16 +43,31 @@ class LlamadasFake:
 class _FalsoBase:
     """Common behaviour of the fakes: the registry and the failure."""
 
-    def __init__(self, llamadas: LlamadasFake, error: Exception | None = None, delay: float = 0.0) -> None:
+    def __init__(
+        self,
+        llamadas: LlamadasFake,
+        error: Exception | None = None,
+        delay: float = 0.0,
+        ignora_cancelacion: bool = False,
+    ) -> None:
         self.llamadas = llamadas
         self.error = error
         self.delay = delay
+        self.ignora_cancelacion = ignora_cancelacion
 
     async def _responder(self, nombre: str, saga_id: str, clave: str | None):
         """Record the call, wait the configured delay and raise the failure."""
         self.llamadas.anotar(nombre, saga_id, clave)
         if self.delay:
-            await asyncio.sleep(self.delay)
+            try:
+                await asyncio.sleep(self.delay)
+            except asyncio.CancelledError:
+                if not self.ignora_cancelacion:
+                    raise
+                # Una llamada en vuelo no muere al cancelarse enseguida: es
+                # lo que pasa con un RPC de gRPC que sigue desenrollandose.
+                await asyncio.sleep(self.delay)
+                raise
         if self.error is not None:
             raise self.error
 
@@ -126,8 +141,9 @@ class FakePagos(_FalsoBase):
         error: Exception | None = None,
         delay: float = 0.0,
         error_reembolso: Exception | None = None,
+        ignora_cancelacion: bool = False,
     ) -> None:
-        super().__init__(llamadas, error, delay)
+        super().__init__(llamadas, error, delay, ignora_cancelacion)
         self.error_reembolso = error_reembolso
         self.cobros: list[dict] = []
 

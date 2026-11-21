@@ -129,5 +129,27 @@ async def serve_grpc(
 
 
 async def wait_for_call(coro: Awaitable[Any], timeout: float) -> Any:
-    """Await a coroutine under a deadline, cancelling it when it expires."""
-    return await asyncio.wait_for(coro, timeout=timeout)
+    """Await a coroutine under a deadline, cancelling it when it expires.
+
+    The deadline is honored even when the cancelled task does not die right
+    away: `asyncio.wait_for` waits for the cancellation to complete, and an
+    in-flight gRPC call can take a while to wind down. Waiting for it meant
+    the deadline was not respected and the caller (the saga orchestrator)
+    stayed blocked with its state half written: the saga never reached its
+    error path, so it was never compensated.
+    """
+    tarea = asyncio.ensure_future(coro)
+    terminadas, _ = await asyncio.wait({tarea}, timeout=timeout)
+    if not terminadas:
+        # The call is cancelled without waiting for it: it may keep winding
+        # down in the background, but the deadline is already met.
+        tarea.cancel()
+        tarea.add_done_callback(_descartar_error)
+        raise asyncio.TimeoutError
+    return tarea.result()
+
+
+def _descartar_error(tarea: asyncio.Task) -> None:
+    """Consume the error of a cancelled task, to keep the logs clean."""
+    if not tarea.cancelled():
+        tarea.exception()
