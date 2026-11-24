@@ -502,7 +502,7 @@ def _compra_como_datos(compra) -> dict:
                 "nombre": compensacion.nombre,
                 "resultado": compensacion.resultado,
                 "detalle": compensacion.detalle,
-                "finalizado_en": compensacion.finalizada_en,
+                "finalizado_en": compensacion.finalizado_en,
             }
             for compensacion in compra.compensaciones
         ],

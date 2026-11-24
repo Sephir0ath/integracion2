@@ -242,3 +242,26 @@ async def test_entradas_sin_saga_id_es_400(http, tokens):
     )
 
     assert respuesta.status_code == 400
+
+
+async def test_iniciar_compra_compensada_devuelve_las_compensaciones(http, tokens, stubs):
+    """Una saga compensada se devuelve con sus compensaciones, no con un 500.
+
+    El borde arma la respuesta con los datos del contrato: cuando la saga
+    compensó, la respuesta incluye las compensaciones aplicadas. Si al
+    traducirlas el borde leyera un atributo que no existe, la respuesta
+    seria un 500 opaco y el cliente perderia el estado de la saga.
+    """
+    stubs["compras"].compensada = True
+
+    respuesta = await http.post(
+        "/api/v1/compras",
+        json={"saga_id": "saga-1", "evento_id": "ev-1", "seccion_id": "sec-1", "butaca_ids": ["sec-1-A1"]},
+        headers={"Authorization": f"Bearer {tokens.cliente()}"},
+    )
+
+    assert respuesta.status_code == 201
+    cuerpo = respuesta.json()
+    assert cuerpo["compra"]["estado"] == "COMPENSADA"
+    assert [c["nombre"] for c in cuerpo["compra"]["compensaciones"]] == ["REEMBOLSAR", "LIBERAR"]
+    assert all("finalizado_en" in c for c in cuerpo["compra"]["compensaciones"])

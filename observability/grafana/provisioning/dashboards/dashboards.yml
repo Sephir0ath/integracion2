@@ -1,0 +1,27 @@
+# Proveedor de dashboards por archivo.
+#
+# Grafana lee este archivo al arrancar y queda listo para cargar los `.json`
+# que estan en la carpeta que el compose monta como volumen:
+#
+#   ./observability/grafana/dashboards -> /var/lib/grafana/dashboards
+#
+# `allowUiUpdates` deja armar o retocar el panel en la UI de Grafana (comodo
+# para construirlo visualmente y despues exportar el JSON al repositorio).
+# Ojo: el archivo del repositorio es la fuente de verdad; si el panel se
+# guarda desde la UI y despues el archivo cambia, el archivo gana.
+
+apiVersion: 1
+
+providers:
+  - name: ticketera
+    orgId: 1
+    folder: Ticketera
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      # Los dashboards se organizan en la carpeta "Ticketera" de la UI, no en
+      # subcarpetas del disco.
+      foldersFromFilesStructure: false

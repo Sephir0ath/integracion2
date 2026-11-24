@@ -1,0 +1,28 @@
+# Valores de las metricas en el momento de la captura
+# generadas el 2026-11-23 22:59:22
+
+## circuit_breaker_state
+consulta: circuit_breaker_state{breaker="pasarela"}
+  {'breaker': 'pasarela', 'instance': 'pagos:9002', 'job': 'pagos', 'state': 'CLOSED'} = 0
+  {'breaker': 'pasarela', 'instance': 'pagos:9002', 'job': 'pagos', 'state': 'OPEN'} = 1
+  {'breaker': 'pasarela', 'instance': 'pagos:9002', 'job': 'pagos', 'state': 'HALF_OPEN'} = 0
+
+## circuit_breaker_transitions_total
+consulta: circuit_breaker_transitions_total{breaker="pasarela"}
+  {'breaker': 'pasarela', 'from_state': 'CLOSED', 'instance': 'pagos:9002', 'job': 'pagos', 'to_state': 'OPEN'} = 10
+  {'breaker': 'pasarela', 'from_state': 'OPEN', 'instance': 'pagos:9002', 'job': 'pagos', 'to_state': 'HALF_OPEN'} = 14
+  {'breaker': 'pasarela', 'from_state': 'HALF_OPEN', 'instance': 'pagos:9002', 'job': 'pagos', 'to_state': 'OPEN'} = 5
+  {'breaker': 'pasarela', 'from_state': 'HALF_OPEN', 'instance': 'pagos:9002', 'job': 'pagos', 'to_state': 'CLOSED'} = 9
+
+## circuit_breaker_rejected_total
+consulta: circuit_breaker_rejected_total{breaker="pasarela"}
+  {'breaker': 'pasarela', 'instance': 'pagos:9002', 'job': 'pagos'} = 136
+
+## bulkhead_in_use
+consulta: bulkhead_in_use{bulkhead="pasarela"}
+  {'bulkhead': 'pasarela', 'instance': 'pagos:9002', 'job': 'pagos'} = 0
+
+## bulkhead_rejected_total
+consulta: bulkhead_rejected_total{bulkhead="pasarela"}
+  {'bulkhead': 'pasarela', 'instance': 'pagos:9002', 'job': 'pagos'} = 20
+

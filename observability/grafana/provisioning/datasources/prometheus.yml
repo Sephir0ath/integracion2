@@ -1,0 +1,28 @@
+# Data source de Prometheus para los dashboards de Grafana.
+#
+# Grafana lee este archivo al arrancar (provisioning) y crea el data source
+# sin que nadie tenga que agregarlo a mano en la UI. Es lo que permite que
+# el stack completo se levante con un solo `docker compose --profile
+# observability up -d`.
+#
+# Ojo con la URL: desde DENTRO del contenedor de Grafana, Prometheus no es
+# `localhost` sino el nombre del servicio en la red de compose.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # El nombre del servicio dentro de la red `ticketera_default`.
+    url: http://prometheus:9090
+    # Fijo a proposito: los dashboards lo referencian por `uid` y no por
+    # nombre, asi siguen funcionando aunque el data source se renombre.
+    uid: prometheus
+    isDefault: true
+    editable: false
+    jsonData:
+      # El mismo periodo que el `scrape_interval` de Prometheus: el panel se
+      # actualiza justo cuando hay un punto nuevo.
+      timeInterval: 15s
+      httpMethod: POST

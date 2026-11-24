@@ -188,31 +188,41 @@ class FakeButacasStub(_StubBase):
 class FakeComprasStub(_StubBase):
     """Doble de `compras.ComprasService`."""
 
-    def __init__(self, error: Exception | None = None, idempotente: bool = False) -> None:
+    def __init__(self, error: Exception | None = None, idempotente: bool = False,
+                 compensada: bool = False) -> None:
         super().__init__(error)
         self.idempotente = idempotente
+        self.compensada = compensada
 
     async def IniciarCompra(self, request, timeout=None, metadata=None):
         """Inicia la saga de compra."""
         self._grabar("IniciarCompra", request, timeout, metadata)
         cantidad = len(request.butaca_ids)
+        estado = "COMPENSADA" if self.compensada else "CONFIRMADA"
         compra = compras_pb2.Compra(
             saga_id=request.saga_id,
-            estado="CONFIRMADA",
+            estado=estado,
             evento_id=request.evento_id,
             seccion_id=request.seccion_id,
             cantidad=cantidad,
             cliente_id=request.cliente_id,
-            error="",
+            error="UNAVAILABLE" if self.compensada else "",
             actualizada_en="2026-03-01T20:05:00",
             monto_total_centavos=55000 * cantidad,
             moneda=request.moneda or "COP",
             pasos=[
                 compras_pb2.Paso(nombre="RESERVAR", resultado="OK", detalle="", iniciado_en="a", finalizado_en="b"),
                 compras_pb2.Paso(nombre="COBRAR", resultado="OK", detalle="", iniciado_en="a", finalizado_en="b"),
-                compras_pb2.Paso(nombre="EMITIR", resultado="OK", detalle="", iniciado_en="a", finalizado_en="b"),
+                compras_pb2.Paso(nombre="EMITIR", resultado="ERROR" if self.compensada else "OK",
+                                detalle="UNAVAILABLE" if self.compensada else "",
+                                iniciado_en="a", finalizado_en=""),
             ],
-            compensaciones=[],
+            compensaciones=[
+                compras_pb2.Compensacion(nombre="REEMBOLSAR", resultado="OK", detalle="",
+                                         finalizado_en="b"),
+                compras_pb2.Compensacion(nombre="LIBERAR", resultado="OK", detalle="",
+                                         finalizado_en="b"),
+            ] if self.compensada else [],
         )
         return compras_pb2.CompraResponse(compra=compra, idempotente=self.idempotente)
 
