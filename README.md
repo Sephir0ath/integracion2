@@ -12,6 +12,7 @@ compartido del límite de peticiones.
 ## Levantar el sistema
 
     docker compose up -d --build
+    docker compose --profile observability up -d
 
 | Qué | Dónde |
 |---|---|
@@ -36,8 +37,13 @@ Usuarios de demostración: `cliente@ticketera.local` / `cliente123` (comprar) y
 
 La falla se inyecta por `POST /admin/fault` en `emision` y `pasarela` (modos
 `ok`, `slow`, `down`). Sus puertos son internos, así que se llaman desde
-dentro de la red de compose; los comandos concretos van en `scripts/`.
+dentro de la red de compose.
 
+```bash
+python scripts/demo_camino_feliz.py
+python scripts/demo_compensacion.py
+python scripts/demo_dependencia_fragil.py
+```
 1. **Camino feliz**: comprar entradas; la saga queda `CONFIRMADA` con sus tres
    pasos (reserva, cobro, emisión).
 2. **Fallo con compensación**: dejar `emision` en `down` y comprar; el pago se
@@ -56,5 +62,5 @@ dentro de la red de compose; los comandos concretos van en `scripts/`.
     frontend/web/                        interfaz
     proto/                               contratos gRPC
     tests/e2e/                           pruebas end-to-end con Playwright
-    docs/                                informe, diagramas, guion de video, evidencia
+    docs/                                evidencia
     observability/                       prometheus y grafana
